@@ -37,5 +37,6 @@ jobs:
           ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
           ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
           IMAGE_URI: ${{ secrets.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${{ github.sha }}
+       - name: Start Nginx Container with Bind Mount
         run: |
-          aws ecs update-service --cluster $ECS_CLUSTER --service $ECS_SERVICE --force-new-deployment --cli-input-json '{"taskDefinition":{"containerDefinitions":[{"name":"nginx","image":"'$IMAGE_URI'"}]}}'
+          docker run -d --name my-nginx -v /path/to/local/index.html:/usr/share/nginx/html/index.html $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
