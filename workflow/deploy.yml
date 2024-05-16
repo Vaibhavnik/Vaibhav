@@ -83,14 +83,6 @@ jobs:
         cluster: ${{ env.ECS_CLUSTER }}
         wait-for-service-stability: true
 
-    - name: Get current task definition
-      id: ecs
-      run: |
-        aws ecs describe-task-definition --task-definition ${TASK_FAMILY} | jq -r '.taskDefinition | {family: .family, executionRoleArn: .executionRoleArn, networkMode: .networkMode, volumes: .volumes, placementConstraints: .placementConstraints, requiresCompatibilities: .requiresCompatibilities, cpu: .cpu, memory: .memory, containerDefinitions: .containerDefinitions}' > task-definition.json
-        if [ "$(jq -r '.taskRoleArn' task-definition.json)" == "null" ]; then
-            jq -r 'del(.taskRoleArn)' task-definition.json > temp.json && mv temp.json task-definition.json
-        fi
-
     - name: Update task definition with latest nginx image
       run: |
         jq --arg IMAGE "nginx:latest" '.containerDefinitions[0].image = $IMAGE' task-definition.json > updated-task-definition.json
