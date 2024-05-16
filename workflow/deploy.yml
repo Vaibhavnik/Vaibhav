@@ -1,4 +1,3 @@
-
 name: Deploy to Amazon ECS
 
 on:
@@ -14,6 +13,7 @@ env:
                                                # file, e.g. .aws/task-definition.json
   CONTAINER_NAME: MY_CONTAINER_NAME           # set this to the name of the container in the
                                                # containerDefinitions section of your task definition
+  TASK_FAMILY: MY_TASK_FAMILY                 # set this to your ECS task family
 
 permissions:
   contents: read
@@ -21,7 +21,7 @@ permissions:
 jobs:
   deploy:
     name: Deploy
-    runs-on: Amazon-linux 
+    runs-on: ubuntu-latest
     environment: production
 
     steps:
@@ -52,6 +52,21 @@ jobs:
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
         echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
+    - name: Get latest image tag from ECR
+      id: ecr
+      env:
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+
+    - name: Get current task definition
+      id: ecs
+      run: |
+        aws ecs describe-task-definition --task-definition ${TASK_FAMILY} | jq -r '.taskDefinition | {family: .family, executionRoleArn: .executionRoleArn, networkMode: .networkMode, volumes: .volumes, placementConstraints: .placementConstraints, requiresCompatibilities: .requiresCompatibilities, cpu: .cpu, memory: .memory, containerDefinitions: .containerDefinitions}' > task-definition.json
+        if [ "$(jq -r '.taskRoleArn' task-definition.json)" == "null" ]; then
+            jq -r 'del(.taskRoleArn)' task-definition.json > temp.json && mv temp.json task-definition.json
+        fi
+
     - name: Fill in the new image ID in the Amazon ECS task definition
       id: task-def
       uses: aws-actions/amazon-ecs-render-task-definition@v1
@@ -67,3 +82,24 @@ jobs:
         service: ${{ env.ECS_SERVICE }}
         cluster: ${{ env.ECS_CLUSTER }}
         wait-for-service-stability: true
+
+    - name: Get current task definition
+      id: ecs
+      run: |
+        aws ecs describe-task-definition --task-definition ${TASK_FAMILY} | jq -r '.taskDefinition | {family: .family, executionRoleArn: .executionRoleArn, networkMode: .networkMode, volumes: .volumes, placementConstraints: .placementConstraints, requiresCompatibilities: .requiresCompatibilities, cpu: .cpu, memory: .memory, containerDefinitions: .containerDefinitions}' > task-definition.json
+        if [ "$(jq -r '.taskRoleArn' task-definition.json)" == "null" ]; then
+            jq -r 'del(.taskRoleArn)' task-definition.json > temp.json && mv temp.json task-definition.json
+        fi
+
+    - name: Update task definition with latest nginx image
+      run: |
+        jq --arg IMAGE "nginx:latest" '.containerDefinitions[0].image = $IMAGE' task-definition.json > updated-task-definition.json
+
+    - name: Register a new revision of the task definition
+      run: |
+        aws ecs register-task-definition --cli-input-json file://updated-task-definition.json
+
+    - name: Update ECS service
+      run: |
+        TASK_DEFINITION_ARN=$(aws ecs describe-task-definition --task-definition ${TASK_FAMILY} | jq -r '.taskDefinition.taskDefinitionArn')
+        aws ecs update-service --cluster ${{ env.ECS_CLUSTER }} --service ${{ env.ECS_SERVICE }} --task-definition $TASK_DEFINITION_ARN --desired-count 2 --force-new-deployment
