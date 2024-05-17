@@ -1,57 +1,90 @@
 name: Deploy to Amazon ECS
 
-on:
-  push:
-    branches:
-      - main
+on: workflow_dispatch 
+
+env:
+  AWS_REGION: ap-south-1
+  ECR_REPOSITORY: nginx
+  ECS_SERVICE: webapp
+  ECS_CLUSTER: ECS_02
+  ECS_TASK_DEFINITION: webapp
+  CONTAINER_NAME: nginx
+  TASK_FAMILY: webapp
+
+permissions:
+  contents: read
 
 jobs:
   deploy:
+    name: Deploy
     runs-on: ubuntu-latest
+    environment: production
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+    - name: Checkout
+      uses: actions/checkout@v4
 
-      - name: Log in to Amazon ECR
-        id: ecr-login
-        uses: aws-actions/amazon-ecr-login@v2
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
 
-      - name: Build, tag, and push image to Amazon ECR
-        id: build-tag-push
-        env:
-          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Get latest image tag from ECR
-        id: get-latest-tag
-        run: |
-          IMAGE_TAG=$(aws ecr describe-images --repository-name ${{ secrets.ECR_REPOSITORY }} --query 'sort_by(imageDetails,& imagePushedAt)[-1].imageTags[0]' --output text)
-          echo "::set-output name=latest-tag::$IMAGE_TAG"
+    - name: Build, tag, and push image to Amazon ECR
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-      - name: Get current task definition
-        id: get-task-def
-        run: |
-          TASK_DEFINITION=$(aws ecs describe-task-definition --task-definition ${{ secrets.TASK_DEFINITION_FAMILY }})
-          echo "$TASK_DEFINITION" > task-definition.json
+    - name: Get latest image tag from ECR
+      id: ecr
+      env:
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
 
-      - name: Fill in the new image ID in the Amazon ECS task definition
-        id: fill-task-def
-        run: |
-          NEW_IMAGE="${{ steps.ecr-login.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:${{ steps.get-latest-tag.outputs.latest-tag }}"
-          jq --arg IMAGE "$NEW_IMAGE" '.taskDefinition.containerDefinitions[0].image = $IMAGE' task-definition.json > new-task-definition.json
+    - name: Get current task definition
+      id: ecs
+      run: |
+        aws ecs describe-task-definition --task-definition ${TASK_FAMILY} | jq -r '.taskDefinition | {family: .family, executionRoleArn: .executionRoleArn, networkMode: .networkMode, volumes: .volumes, placementConstraints: .placementConstraints, requiresCompatibilities: .requiresCompatibilities, cpu: .cpu, memory: .memory, containerDefinitions: .containerDefinitions}' > task-definition.json
+        if [ "$(jq -r '.taskRoleArn' task-definition.json)" == "null" ]; then
+            jq -r 'del(.taskRoleArn)' task-definition.json > temp.json && mv temp.json task-definition.json
+        fi
 
-      - name: Register a new revision of the task definition
-        id: register-task-def
-        run: |
-          NEW_TASK_DEFINITION=$(aws ecs register-task-definition --cli-input-json file://new-task-definition.json)
-          NEW_REVISION=$(echo $NEW_TASK_DEFINITION | jq -r '.taskDefinition.revision')
-          echo "::set-output name=new-revision::$NEW_REVISION"
+    - name: Fill in the new image ID in the Amazon ECS task definition
+      id: task-def
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: ${{ env.ECS_TASK_DEFINITION }}
+        container-name: ${{ env.CONTAINER_NAME }}
+        image: ${{ steps.build-image.outputs.image }}
 
-      - name: Update ECS service
-        run: |
-          aws ecs update-service --cluster ${{ secrets.ECS_CLUSTER }} --service ${{ secrets.ECS_SERVICE }} --task-definition ${{ secrets.TASK_DEFINITION_FAMILY }}:${{ steps.register-task-def.outputs.new-revision }}
+    - name: Deploy Amazon ECS task definition
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        task-definition: ${{ steps.task-def.outputs.task-definition }}
+        service: ${{ env.ECS_SERVICE }}
+        cluster: ${{ env.ECS_CLUSTER }}
+        wait-for-service-stability: true
+
+    - name: Update task definition with latest nginx image
+      run: |
+        jq --arg IMAGE "nginx:latest" '.containerDefinitions[0].image = $IMAGE' task-definition.json > updated-task-definition.json
+
+    - name: Register a new revision of the task definition
+      run: |
+        aws ecs register-task-definition --cli-input-json file://updated-task-definition.json
+
+    - name: Update ECS service
+      run: |
+        TASK_DEFINITION_ARN=$(aws ecs describe-task-definition --task-definition ${TASK_FAMILY} | jq -r '.taskDefinition.taskDefinitionArn')
+        aws ecs update-service --cluster ${{ env.ECS_CLUSTER }} --service ${{ env.ECS_SERVICE }} --task-definition $TASK_DEFINITION_ARN --desired-count 2 --force-new-deployment
