@@ -10,7 +10,7 @@ env:
   ECS_TASK_DEFINITION: webapp
   CONTAINER_NAME: nginx
   TASK_FAMILY: webapp
-  ECR_URL: public.ecr.aws/h6k1h9x7
+  ECR_URL: public.ecr.aws/h6k1h9x7/nginx
 
 permissions:
   contents: read
