@@ -13,7 +13,7 @@ env:
   ECR_URL: public.ecr.aws/h6k1h9x7
 
 permissions:
-  contents: read
+  contents: writes-all
 
 jobs:
   deploy:
