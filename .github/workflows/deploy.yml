@@ -10,6 +10,7 @@ env:
   ECS_TASK_DEFINITION: webapp
   CONTAINER_NAME: nginx
   TASK_FAMILY: webapp
+  ECR_URL: public.ecr.aws/h6k1h9x7
 
 permissions:
   contents: read
@@ -41,9 +42,9 @@ jobs:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         IMAGE_TAG: ${{ github.sha }}
       run: |
-        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+        docker build -t $ECS_REGISTRY:$IMAGE_TAG .
+        docker push $ECR_URL/$ECR_REGISTRY:$IMAGE_TAG
+        echo "image=$ECR_URL/$ECR_REGISTRY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
     - name: Get latest image tag from ECR
       id: ecr
