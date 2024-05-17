@@ -4,7 +4,7 @@ on: workflow_dispatch
 
 env:
   AWS_REGION: ap-south-1
-  ECR_REPOSITORY: nginx:latest
+  ECR_REPOSITORY: nginx
   ECS_SERVICE: webapp
   ECS_CLUSTER: ECS_02
   ECS_TASK_DEFINITION: webapp
