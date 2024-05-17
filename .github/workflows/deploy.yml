@@ -1,18 +1,15 @@
 name: Deploy to Amazon ECS
 
 on: workflow_dispatch 
- 
 
 env:
-  AWS_REGION: ap-south-1                   # set this to your preferred AWS region, e.g. us-west-1
-  ECR_REPOSITORY: nginx           # set this to your Amazon ECR repository name
-  ECS_SERVICE: webapp                 # set this to your Amazon ECS service name
-  ECS_CLUSTER: ECS_02                 # set this to your Amazon ECS cluster name
-  ECS_TASK_DEFINITION: webapp # set this to the path to your Amazon ECS task definition
-                                               # file, e.g. .aws/task-definition.json
-  CONTAINER_NAME: nginx          # set this to the name of the container in the
-                                               # containerDefinitions section of your task definition
-  TASK_FAMILY: webapp                # set this to your ECS task family
+  AWS_REGION: ap-south-1
+  ECR_REPOSITORY: nginx
+  ECS_SERVICE: webapp
+  ECS_CLUSTER: ECS_02
+  ECS_TASK_DEFINITION: webapp
+  CONTAINER_NAME: nginx
+  TASK_FAMILY: webapp
 
 permissions:
   contents: read
@@ -44,9 +41,6 @@ jobs:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         IMAGE_TAG: ${{ github.sha }}
       run: |
-        # Build a docker container and
-        # push it to ECR so that it can
-        # be deployed to ECS.
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
         echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
